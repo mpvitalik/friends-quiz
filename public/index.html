@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1E1B4B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>F.R.I.E.N.D.S — Мультиплеер Квиз</title>
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&family=Nunito:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/liquid-glass.css">
+</head>
+<body>
+
+  <!-- Liquid Glass Background Blobs -->
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <div class="app-container">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="friends-logo">
+        F<span class="dot dot-red"></span>R<span class="dot dot-blue"></span>I<span class="dot dot-yellow"></span>E<span class="dot dot-red"></span>N<span class="dot dot-blue"></span>D<span class="dot dot-yellow"></span>S
+      </div>
+      <div class="app-subtitle">Квиз-битва для компании на телефонах</div>
+    </header>
+
+    <!-- SCREEN 1: HOME (Mode Selection) -->
+    <div id="screenHome" class="screen active">
+      <div class="glass-card" style="text-align: center;">
+        <div style="font-size: 3rem; margin-bottom: 8px;">🛋️☕</div>
+        <h2 style="font-family: var(--font-display); font-weight: 900; margin-bottom: 8px;">Добро пожаловать!</h2>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 24px;">
+          Соревнуйтесь с друзьями в реальном времени. Нажимайте кнопку «ЗНАЮ» быстрее всех и набирайте баллы!
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <button class="glass-btn primary" id="btnHostRoom">
+            <span>👑 Создать игру (Ведущий)</span>
+          </button>
+          <button class="glass-btn accent" id="btnJoinRoom">
+            <span>🎮 Войти по коду комнаты</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCREEN 2: CREATE ROOM -->
+    <div id="screenCreateRoom" class="screen">
+      <div class="glass-card">
+        <h3 style="font-family: var(--font-display); font-weight: 800; margin-bottom: 16px;">Создание комнаты</h3>
+        
+        <div class="form-group">
+          <label class="form-label">Ваше имя (Ведущий):</label>
+          <input type="text" id="hostNameInput" class="glass-input" placeholder="Например: Моника" value="Моника">
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button class="glass-btn secondary" id="btnBackHome1" style="flex: 1;">Назад</button>
+          <button class="glass-btn primary" id="btnConfirmCreate" style="flex: 2;">Создать</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCREEN 3: JOIN ROOM -->
+    <div id="screenJoinRoom" class="screen">
+      <div class="glass-card">
+        <h3 style="font-family: var(--font-display); font-weight: 800; margin-bottom: 16px;">Вход в комнату</h3>
+
+        <div class="form-group">
+          <label class="form-label">4-буквенный PIN код комнаты:</label>
+          <input type="text" id="joinCodeInput" class="glass-input uppercase" placeholder="ROSS" maxlength="6">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Ваше имя в игре:</label>
+          <input type="text" id="playerNameInput" class="glass-input" placeholder="Например: Джоуи" value="Джоуи">
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button class="glass-btn secondary" id="btnBackHome2" style="flex: 1;">Назад</button>
+          <button class="glass-btn accent" id="btnConfirmJoin" style="flex: 2;">Войти в игру</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCREEN 4: LOBBY -->
+    <div id="screenLobby" class="screen">
+      <div class="glass-card">
+        <div class="room-code-box">
+          <div class="room-code-tag">Код для подключения друзей:</div>
+          <div class="room-code-value" id="displayRoomCode">ROSS</div>
+          <div style="color: var(--text-muted); font-size: 0.85rem;">Все телефоны должны ввести этот код</div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
+          <span class="form-label" id="playerCountLabel">Игроки:</span>
+          <span style="font-size: 0.8rem; color: #34D399; font-weight: 700;">● Онлайн</span>
+        </div>
+
+        <div class="players-grid" id="lobbyPlayersList">
+          <!-- Populated by JS -->
+        </div>
+
+        <div id="lobbyStatusText" style="text-align: center; color: var(--text-muted); font-size: 0.9rem; margin: 15px 0;"></div>
+
+        <button class="glass-btn primary" id="btnStartGame" style="width: 100%; margin-top: 10px;">
+          🚀 Начать раунд (20 вопросов)
+        </button>
+      </div>
+    </div>
+
+    <!-- SCREEN 5: GAMEPLAY & BUZZER -->
+    <div id="screenGame" class="screen">
+      
+      <!-- Top Status -->
+      <div class="game-status-bar">
+        <span class="round-badge" id="roundBadge">Вопрос 1 / 20</span>
+        <div class="timer-box">
+          <span>⏱️</span>
+          <span id="timerVal">60s</span>
+        </div>
+      </div>
+
+      <!-- Question Card (Matching template) -->
+      <div class="question-card">
+        <div class="card-top-row">
+          <span class="card-title">Карточка <span id="cardNumBadge" style="color: var(--primary-yellow);">#1</span></span>
+          <span class="card-diff-tag">[<span id="cardDiffBadge">Легкий</span>]</span>
+        </div>
+
+        <div class="card-q-box">
+          <div style="color: var(--primary-red); font-weight: 800; font-size: 0.9rem; margin-bottom: 2px;">? Вопрос:</div>
+          <div class="card-q-ru" id="qRuText">Загрузка вопроса...</div>
+          <div class="card-q-en" id="qEnText">English translation...</div>
+        </div>
+
+        <!-- Options A/B/C/D (Locked until buzzer) -->
+        <div style="color: var(--primary-yellow); font-weight: 800; font-size: 0.85rem; margin-top: 10px;">📋 Варианты:</div>
+        <div class="options-grid" id="optionsGrid">
+          <button class="option-btn" data-index="0">
+            <span class="opt-prefix">A</span>
+            <span class="opt-text">Вариант A</span>
+          </button>
+          <button class="option-btn" data-index="1">
+            <span class="opt-prefix">B</span>
+            <span class="opt-text">Вариант B</span>
+          </button>
+          <button class="option-btn" data-index="2">
+            <span class="opt-prefix">C</span>
+            <span class="opt-text">Вариант C</span>
+          </button>
+          <button class="option-btn" data-index="3">
+            <span class="opt-prefix">D</span>
+            <span class="opt-text">Вариант D</span>
+          </button>
+        </div>
+
+        <!-- Explanation card -->
+        <div class="explanation-card" id="explanationBox">
+          <strong>✅ Ответ:</strong> <span id="ansText">Ответ</span><br>
+          <span id="ansExp">Контекст</span>
+        </div>
+      </div>
+
+      <!-- Answering Banner -->
+      <div class="answering-banner" id="answeringBanner">
+        Отвечает: Чендлер...
+      </div>
+
+      <!-- BUZZER BUTTON -->
+      <div class="buzzer-container">
+        <button class="buzzer-btn" id="btnBuzzer">
+          <span>ЗНАЮ!</span>
+          <span style="font-size: 0.7rem; font-weight: 700; opacity: 0.8; margin-top: 4px;" id="buzzerStatusText">НАЖМИ ПЕРВЫМ!</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- SCREEN 6: GAME OVER & DIPLOMA -->
+    <div id="screenGameOver" class="screen">
+      <div class="diploma-card">
+        <div style="font-size: 2.4rem;">🏆</div>
+        <div class="diploma-title">ПОБЕДИТЕЛЬ КВИЗА</div>
+        <div class="diploma-winner-name" id="winnerNameDisplay">ЧЕНДЛЕР</div>
+        <div style="font-size: 1.1rem; color: #34D399; font-weight: 800;" id="winnerScoreDisplay">18 баллов</div>
+        <div class="diploma-quote">«See? She's your lobster!» — Фиби Буффе</div>
+      </div>
+
+      <div class="glass-card">
+        <h4 style="font-family: var(--font-display); font-weight: 800; margin-bottom: 12px; color: var(--primary-yellow);">ИТОГОВЫЙ СЧЕТ:</h4>
+        <div class="scoreboard" id="finalScoreboard">
+          <!-- Populated by JS -->
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
+          <button class="glass-btn primary" id="btnDownloadDiploma">
+            📥 Сохранить Грамоту (PNG)
+          </button>
+          <button class="glass-btn secondary" id="btnPlayAgain">
+            🔄 Сыграть еще раз
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/sounds.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/app.js"></script>
+  
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(console.error);
+    }
+  </script>
+</body>
+</html>

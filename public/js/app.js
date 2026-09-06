@@ -50,6 +50,19 @@ class FriendsQuizGame {
   }
 
   setupDOMHandlers() {
+    // Global click blip for every button
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('button')) window.sounds.playClick();
+    });
+
+    // Sound on/off toggle
+    const soundBtn = document.getElementById('btnSoundToggle');
+    if (soundBtn) {
+      const paint = () => { soundBtn.textContent = window.sounds.enabled ? '🔊' : '🔇'; };
+      paint();
+      soundBtn.onclick = () => { window.sounds.toggle(); paint(); };
+    }
+
     // Nav buttons
     document.getElementById('btnHostRoom').onclick = () => this.showScreen('screenCreateRoom');
     document.getElementById('btnJoinRoom').onclick = () => this.showScreen('screenJoinRoom');
@@ -197,14 +210,42 @@ class FriendsQuizGame {
   }
 
   hostStartGame() {
-    // Pick 20 random questions from the 502 database
+    if (!this.allQuestions.length) {
+      alert('Вопросы не загрузились. Обновите страницу и попробуйте снова.');
+      return;
+    }
+
+    // Pick N random questions from the database
     const shuffled = [...this.allQuestions].sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, 20);
+    const count = Math.min(this.totalRounds, shuffled.length);
+    const selected = shuffled.slice(0, count).map(q => this.prepareQuestion(q));
 
     window.network.send('GAME_STARTED', {
       questions: selected,
       players: this.players
     });
+  }
+
+  // In the source data options[0] is ALWAYS the correct answer.
+  // Shuffle the options once (on the host) and remember where the correct one lands,
+  // so every client sees the same order and the same correct index.
+  prepareQuestion(q) {
+    const rawOptions = Array.isArray(q.options) && q.options.length
+      ? q.options.slice()
+      : [q.answer];
+
+    const correctText = rawOptions[0];
+    const shuffled = rawOptions
+      .map(value => ({ value, r: Math.random() }))
+      .sort((a, b) => a.r - b.r)
+      .map(o => o.value);
+
+    return {
+      ...q,
+      options: shuffled,
+      correctIndex: shuffled.indexOf(correctText),
+      correctText
+    };
   }
 
   renderQuestion() {
@@ -226,13 +267,14 @@ class FriendsQuizGame {
     document.getElementById('qEnText').textContent = q.question_en || '';
 
     // Options (Locked initially!)
-    const opts = q.options || [q.answer, 'Вариант B', 'Вариант C', 'Вариант D'];
+    const opts = q.options || [];
     document.querySelectorAll('.option-btn').forEach((btn, idx) => {
       btn.className = 'option-btn'; // remove active / correct / wrong
+      btn.style.display = opts[idx] != null ? 'flex' : 'none';
       btn.querySelector('.opt-text').textContent = opts[idx] || '';
     });
 
-    // Reset Explanation
+    // Reset Explanation (hidden until the answer is revealed)
     const exp = document.getElementById('explanationBox');
     exp.className = 'explanation-card';
     exp.innerHTML = `<strong>✅ Ответ:</strong> ${q.answer}<br><span style="margin-top:4px;display:inline-block;">💡 ${q.explanation || ''}</span>`;
@@ -246,6 +288,8 @@ class FriendsQuizGame {
     // Start 60s question countdown
     this.updateTimerDisplay(this.questionTimeLeft);
     this.startQuestionTimer();
+
+    window.sounds.playStart();
   }
 
   startQuestionTimer() {
@@ -302,9 +346,7 @@ class FriendsQuizGame {
 
     if (this.isSpamBlocked) return;
 
-    window.sounds.playBuzzer();
-
-    // Broadcast buzzer
+    // Broadcast buzzer (sound plays for everyone in onPlayerBuzzed)
     window.network.send('SYNC_BUZZER', {
       playerId: window.network.playerId,
       playerName: window.network.playerName
@@ -313,6 +355,8 @@ class FriendsQuizGame {
 
   onPlayerBuzzed(playerId, playerName) {
     if (this.gameState !== 'QUESTION') return;
+
+    window.sounds.playBuzzer();
 
     this.gameState = 'BUZZED';
     this.answeringPlayerId = playerId;
@@ -366,13 +410,11 @@ class FriendsQuizGame {
   submitAnswer(optIndex, isTimeout = false) {
     clearInterval(this.timerInterval);
     const q = this.gameQuestions[this.currentQIndex];
-    const opts = q.options || [];
-    const chosenText = (optIndex >= 0 && opts[optIndex]) ? opts[optIndex] : '';
 
-    const isCorrect = !isTimeout && (
-      chosenText.trim().toLowerCase() === q.answer.trim().toLowerCase() ||
-      q.answer.toLowerCase().includes(chosenText.toLowerCase())
-    );
+    // Correctness is decided purely by index: the correct option is the one
+    // the host marked as correctIndex when the game started.
+    const correctIndex = (typeof q.correctIndex === 'number') ? q.correctIndex : 0;
+    const isCorrect = !isTimeout && optIndex >= 0 && optIndex === correctIndex;
 
     window.network.send('ANSWER_RESULT', {
       playerId: window.network.playerId,
@@ -387,18 +429,23 @@ class FriendsQuizGame {
     clearInterval(this.timerInterval);
     const { playerId, playerName, optIndex, isCorrect } = payload;
     const q = this.gameQuestions[this.currentQIndex];
-    const opts = q.options || [];
+    const correctIndex = (typeof q.correctIndex === 'number') ? q.correctIndex : 0;
 
     // Highlight options
     const optionBtns = document.querySelectorAll('.option-btn');
     optionBtns.forEach(b => b.classList.remove('active-for-player'));
 
+    // Make sure the player exists locally (late joiners / desync safety)
+    if (!this.players[playerId]) {
+      this.players[playerId] = { name: playerName, score: 0, isHost: false };
+    }
+
     if (isCorrect) {
       window.sounds.playCorrect();
       this.players[playerId].score += 1;
 
-      if (optIndex >= 0 && optionBtns[optIndex]) {
-        optionBtns[optIndex].classList.add('correct');
+      if (optionBtns[correctIndex]) {
+        optionBtns[correctIndex].classList.add('correct');
       }
 
       document.getElementById('answeringBanner').textContent = `🎉 ${playerName} ответил верно (+1 балл)!`;
@@ -442,10 +489,12 @@ class FriendsQuizGame {
         }, 1500);
 
       } else {
-        // Everyone failed or time ran out
+        // Everyone failed or time ran out — reveal the correct option
+        this.gameState = 'REVEAL';
+        if (optionBtns[correctIndex]) optionBtns[correctIndex].classList.add('correct');
         document.getElementById('answeringBanner').textContent = `Никто не ответил правильно!`;
         document.getElementById('explanationBox').classList.add('show');
-        
+
         setTimeout(() => {
           if (window.network.isHost) {
             this.advanceNextQuestion();
@@ -457,6 +506,13 @@ class FriendsQuizGame {
 
   handleQuestionTimeout() {
     this.gameState = 'REVEAL';
+    window.sounds.playTimeout();
+
+    const q = this.gameQuestions[this.currentQIndex];
+    const correctIndex = (q && typeof q.correctIndex === 'number') ? q.correctIndex : 0;
+    const correctBtn = document.querySelectorAll('.option-btn')[correctIndex];
+    if (correctBtn) correctBtn.classList.add('correct');
+
     document.getElementById('answeringBanner').textContent = '⏰ Время вышло!';
     document.getElementById('answeringBanner').classList.add('show');
     document.getElementById('btnBuzzer').classList.add('locked');
@@ -558,7 +614,7 @@ class FriendsQuizGame {
     // Score & Quote
     ctx.fillStyle = '#34D399';
     ctx.font = '800 32px Montserrat, sans-serif';
-    ctx.fillText(`Результат: ${winner.score} баллов из 20 раундов`, 600, 490);
+    ctx.fillText(`Результат: ${winner.score} баллов из ${this.totalRounds} раундов`, 600, 490);
 
     ctx.fillStyle = '#FFD23F';
     ctx.font = 'italic 700 28px Nunito, sans-serif';

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'friends-quiz-v1';
+const CACHE_NAME = 'friends-quiz-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -23,7 +23,7 @@ self.addEventListener('activate', (e) => {
       return Promise.all(
         keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
       );
-    })
+    }).then(() => self.clients.claim())
   );
 });
 

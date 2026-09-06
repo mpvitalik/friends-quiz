@@ -87,7 +87,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  margin: auto 0;
+  margin: 0 auto;
   padding-bottom: 24px;
 }
 
@@ -95,7 +95,30 @@ body {
 .app-header {
   text-align: center;
   padding: 8px 0;
+  position: relative;
 }
+
+.sound-toggle {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 50;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+.sound-toggle:active { transform: scale(0.9); }
 
 .friends-logo {
   font-family: var(--font-display);
@@ -663,6 +686,77 @@ body {
 @media (max-width: 480px) {
   body { padding: 10px; }
   .friends-logo { font-size: 1.85rem; }
-  .buzzer-btn { width: 145px; height: 145px; font-size: 1.35rem; }
+  .buzzer-btn { width: 130px; height: 130px; font-size: 1.25rem; }
   .glass-card { padding: 18px 14px; border-radius: 20px; }
+}
+
+/* ==========================================================================
+   GAMEPLAY SCREEN — keep the question + buzzer visible without scrolling
+   ========================================================================== */
+
+/* Reclaim vertical space: drop the tall logo header while playing */
+.app-container:has(#screenGame.active) .app-header,
+.app-container:has(#screenGameOver.active) .app-header {
+  display: none;
+}
+.app-container:has(#screenGame.active) {
+  gap: 10px;
+}
+.app-container:has(#screenGame.active) .screen.active {
+  gap: 10px;
+}
+
+/* Timer bar stays pinned to the top while scrolling the question */
+#screenGame .game-status-bar {
+  position: sticky;
+  top: 6px;
+  z-index: 20;
+  padding-right: 54px; /* clear the fixed sound toggle */
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Buzzer stays pinned to the bottom — always one tap away */
+#screenGame .buzzer-container {
+  position: sticky;
+  bottom: 8px;
+  z-index: 20;
+  margin: 4px 0 0;
+}
+
+/* Tighter question card so options + buzzer fit one screen */
+#screenGame .question-card {
+  padding: 14px 16px;
+}
+#screenGame .card-top-row { margin-bottom: 8px; }
+#screenGame .card-q-box { margin: 6px 0 10px; }
+#screenGame .card-q-ru {
+  font-size: 1.02rem;
+  line-height: 1.35;
+}
+#screenGame .card-q-en { font-size: 0.82rem; }
+#screenGame .options-grid {
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+#screenGame .option-btn {
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  border-radius: 12px;
+}
+#screenGame .buzzer-btn {
+  width: 128px;
+  height: 128px;
+  font-size: 1.2rem;
+  border-width: 4px;
+}
+#screenGame .buzzer-btn::after {
+  top: -8px; left: -8px; right: -8px; bottom: -8px;
+}
+
+/* Fallback for browsers without :has() — at least shrink the header */
+@supports not selector(:has(*)) {
+  .app-header { padding: 4px 0; }
+  .friends-logo { font-size: 1.6rem; }
 }

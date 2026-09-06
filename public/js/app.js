@@ -168,6 +168,7 @@ class FriendsQuizGame {
       this.players = msg.payload.players;
       this.showScreen('screenGame');
       this.renderQuestion();
+      window.sounds.startMusic(); // light background tension bed
     });
 
     window.network.on('SYNC_BUZZER', (msg) => {
@@ -539,6 +540,7 @@ class FriendsQuizGame {
 
   renderGameOver() {
     clearInterval(this.timerInterval);
+    window.sounds.stopMusic();
     this.showScreen('screenGameOver');
     window.sounds.playFanfare();
 

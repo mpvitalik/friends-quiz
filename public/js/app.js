@@ -19,6 +19,11 @@ class FriendsQuizGame {
     this.answeringPlayerId = null;
     this.failedPlayersForCurrentQ = new Set();
 
+    // Anti-desync / anti-double-count
+    this.scoredKeys = new Set();     // "<qIndex>:<playerId>" already scored
+    this.lastAdvancedIndex = -1;     // last question index we've requested to advance from
+    this.hostWatchdog = null;        // host-only: force-advance if a question gets stuck
+
     // Anti-spam
     this.lastBuzzerAttempt = 0;
     this.isSpamBlocked = false;
@@ -165,6 +170,8 @@ class FriendsQuizGame {
       this.gameQuestions = msg.payload.questions;
       this.totalRounds = this.gameQuestions.length;
       this.currentQIndex = 0;
+      this.lastAdvancedIndex = -1;
+      this.scoredKeys.clear();
       this.players = msg.payload.players;
       this.showScreen('screenGame');
       this.renderQuestion();
@@ -255,6 +262,17 @@ class FriendsQuizGame {
     this.answeringPlayerId = null;
     this.failedPlayersForCurrentQ.clear();
     this.questionTimeLeft = 60;
+
+    // Host-only safety net: if this question never resolves (a phone locked
+    // mid-answer, a dropped message, etc.), force it forward so the game
+    // can't hang for everyone.
+    if (window.network.isHost) {
+      clearTimeout(this.hostWatchdog);
+      this.hostWatchdog = setTimeout(() => {
+        console.warn('⏱️ Host watchdog: force-advancing stuck question', this.currentQIndex);
+        this.advanceNextQuestion();
+      }, 125000);
+    }
 
     const q = this.gameQuestions[this.currentQIndex];
 
@@ -441,9 +459,15 @@ class FriendsQuizGame {
       this.players[playerId] = { name: playerName, score: 0, isHost: false };
     }
 
+    // A given player can only be scored once per question. Guards against a
+    // duplicated ANSWER_RESULT (double delivery, timeout + click race, etc.).
+    const scoreKey = `${this.currentQIndex}:${playerId}`;
+    const alreadyScored = this.scoredKeys.has(scoreKey);
+    if (!alreadyScored) this.scoredKeys.add(scoreKey);
+
     if (isCorrect) {
       window.sounds.playCorrect();
-      this.players[playerId].score += 1;
+      if (!alreadyScored) this.players[playerId].score += 1;
 
       if (optionBtns[correctIndex]) {
         optionBtns[correctIndex].classList.add('correct');
@@ -461,7 +485,7 @@ class FriendsQuizGame {
 
     } else {
       window.sounds.playWrong();
-      this.players[playerId].score -= 2;
+      if (!alreadyScored) this.players[playerId].score -= 2;
 
       if (optIndex >= 0 && optionBtns[optIndex]) {
         optionBtns[optIndex].classList.add('wrong');
@@ -527,6 +551,12 @@ class FriendsQuizGame {
   }
 
   advanceNextQuestion() {
+    // Several code paths schedule an advance (correct answer, all-failed,
+    // timeout, host watchdog). Make sure we only move on once per question.
+    if (this.lastAdvancedIndex >= this.currentQIndex) return;
+    this.lastAdvancedIndex = this.currentQIndex;
+    clearTimeout(this.hostWatchdog);
+
     if (this.currentQIndex + 1 < this.totalRounds) {
       window.network.send('NEXT_QUESTION', {
         qIndex: this.currentQIndex + 1
@@ -540,6 +570,7 @@ class FriendsQuizGame {
 
   renderGameOver() {
     clearInterval(this.timerInterval);
+    clearTimeout(this.hostWatchdog);
     window.sounds.stopMusic();
     this.showScreen('screenGameOver');
     window.sounds.playFanfare();

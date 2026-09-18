@@ -79,7 +79,26 @@ function scoresSnapshot(room) {
   return out;
 }
 
+// Only one game at a time: a room is "active" while it isn't finished and
+// at least one of its players still has an open socket.
+function hasActiveRoom() {
+  for (const room of rooms.values()) {
+    if (room.finished) continue;
+    for (const p of room.players.values()) {
+      if (p.ws && p.ws.readyState === 1) return true;
+    }
+  }
+  return false;
+}
+
+// Tell every connected client (even ones not in a room) whether hosting is possible
+function broadcastLobbyStatus() {
+  const msg = JSON.stringify({ type: 'LOBBY_STATUS', payload: { busy: hasActiveRoom() } });
+  wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
+}
+
 wss.on('connection', (ws) => {
+  ws.send(JSON.stringify({ type: 'LOBBY_STATUS', payload: { busy: hasActiveRoom() } }));
   let currentRoomCode = null;
   let currentPlayerId = null;
 
@@ -99,6 +118,14 @@ wss.on('connection', (ws) => {
             existing.hostWs = ws;
             existing.players.get(senderId).ws = ws;
             ws.send(JSON.stringify({ type: 'SCORES', roomCode, payload: { scores: scoresSnapshot(existing) } }));
+            break;
+          }
+
+          if (hasActiveRoom()) {
+            // Someone else is already hosting
+            currentRoomCode = null;
+            currentPlayerId = null;
+            ws.send(JSON.stringify({ type: 'ROOM_BUSY', payload: {} }));
             break;
           }
 
@@ -162,6 +189,7 @@ wss.on('connection', (ws) => {
         case 'GAME_STARTED': {
           const room = rooms.get(roomCode);
           if (room) {
+            room.finished = false;
             room.buzzerLocked = false;
             room.scoreKeys = new Set();
             room.players.forEach((p) => { p.score = 0; });
@@ -172,7 +200,10 @@ wss.on('connection', (ws) => {
 
         case 'GAME_OVER': {
           const room = rooms.get(roomCode);
-          if (room) msg.payload = { ...payload, players: scoresSnapshot(room) };
+          if (room) {
+            room.finished = true;
+            msg.payload = { ...payload, players: scoresSnapshot(room) };
+          }
           broadcastToRoom(roomCode, msg);
           break;
         }
@@ -216,9 +247,11 @@ wss.on('connection', (ws) => {
     } catch (err) {
       console.error('Error handling WebSocket message', err);
     }
+    broadcastLobbyStatus();
   });
 
   ws.on('close', () => {
+    broadcastLobbyStatus();
     if (!currentRoomCode || !rooms.has(currentRoomCode)) return;
     const room = rooms.get(currentRoomCode);
     const player = room.players.get(currentPlayerId);

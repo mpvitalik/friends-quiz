@@ -760,3 +760,20 @@ body {
   .app-header { padding: 4px 0; }
   .friends-logo { font-size: 1.6rem; }
 }
+
+/* Disabled buttons (e.g. "Create game" while another host has a live room) */
+.glass-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
+  transform: none;
+  box-shadow: none;
+}
+.glass-btn:disabled:hover { transform: none; border-color: var(--glass-border); }
+
+.busy-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  margin-top: 2px;
+}

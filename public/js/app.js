@@ -168,6 +168,17 @@ class FriendsQuizGame {
       this.renderLobbyPlayers();
     });
 
+    // Only one host at a time: lock "Create game" while a game is in progress
+    window.network.on('LOBBY_STATUS', (msg) => this.setHostingBusy(!!msg.payload.busy));
+
+    window.network.on('ROOM_BUSY', () => {
+      alert('Игра уже создана другим ведущим. Войдите по коду комнаты.');
+      window.network.roomCode = null;
+      window.network.isHost = false;
+      this.players = {};
+      this.showScreen('screenHome');
+    });
+
     // Authoritative scores from the server (sent on (re)join)
     window.network.on('SCORES', (msg) => {
       this.applyScores(msg.payload.scores);
@@ -202,6 +213,19 @@ class FriendsQuizGame {
       this.players = msg.payload.players;
       this.renderGameOver();
     });
+  }
+
+  setHostingBusy(busy) {
+    this.hostingBusy = busy;
+    // The current host is already in a room — don't lock their own UI
+    const inRoom = !!window.network.roomCode;
+    const lock = busy && !inRoom;
+    ['btnHostRoom', 'btnConfirmCreate'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = lock;
+    });
+    const hint = document.getElementById('hostBusyHint');
+    if (hint) hint.hidden = !lock;
   }
 
   // Server is the single source of truth for scores.

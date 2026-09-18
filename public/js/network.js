@@ -32,41 +32,86 @@ class NetworkManager {
 
   connect() {
     return new Promise((resolve) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-      try {
-        this.ws = new WebSocket(wsUrl);
-
-        this.ws.onopen = () => {
-          this.connected = true;
-          console.log('✅ Connected to WebSocket server');
-          resolve(true);
-        };
-
-        this.ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            this.handleMessage(msg);
-          } catch (err) {
-            console.error('Invalid message from WS', err);
-          }
-        };
-
-        this.ws.onerror = () => {
-          console.warn('⚠️ WebSocket not available, using Local Bus fallback');
-          this.connected = false;
-          resolve(false);
-        };
-
-        this.ws.onclose = () => {
-          this.connected = false;
-        };
-      } catch (e) {
-        this.connected = false;
-        resolve(false);
-      }
+      this._resolveFirst = resolve;
+      this._open();
     });
+  }
+
+  _open() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
+
+      ws.onopen = () => {
+        this.connected = true;
+        this.everConnected = true;
+        this.retry = 0;
+        console.log('✅ Connected to WebSocket server');
+
+        // Coming back after a drop: re-attach to the room (server keeps our score)
+        if (this.roomCode && this.rejoinNeeded) {
+          this.rejoinNeeded = false;
+          this._rawSend(this.isHost
+            ? { type: 'CREATE_ROOM', payload: { hostId: this.playerId, hostName: this.playerName } }
+            : { type: 'JOIN_ROOM', payload: { playerId: this.playerId, playerName: this.playerName } });
+        }
+        // Flush anything queued while offline
+        const queued = this.queue || [];
+        this.queue = [];
+        queued.forEach((m) => ws.send(JSON.stringify(m)));
+
+        if (this._resolveFirst) { this._resolveFirst(true); this._resolveFirst = null; }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          this.handleMessage(JSON.parse(event.data));
+        } catch (err) {
+          console.error('Invalid message from WS', err);
+        }
+      };
+
+      ws.onerror = () => {
+        console.warn('⚠️ WebSocket error');
+        if (this._resolveFirst) { this._resolveFirst(false); this._resolveFirst = null; }
+      };
+
+      ws.onclose = () => {
+        this.connected = false;
+        if (this.roomCode) this.rejoinNeeded = true;
+        this._scheduleReconnect();
+      };
+    } catch (e) {
+      this.connected = false;
+      if (this._resolveFirst) { this._resolveFirst(false); this._resolveFirst = null; }
+      this._scheduleReconnect();
+    }
+  }
+
+  // Mobile browsers kill sockets when the app is backgrounded — reconnect.
+  _scheduleReconnect() {
+    if (this._reconnectTimer) return;
+    this.retry = (this.retry || 0) + 1;
+    const delay = Math.min(500 * this.retry, 4000);
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._open();
+    }, delay);
+  }
+
+  _rawSend(partial) {
+    const msg = {
+      roomCode: this.roomCode,
+      senderId: this.playerId,
+      senderName: this.playerName,
+      timestamp: Date.now(),
+      payload: {},
+      ...partial
+    };
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
   send(type, payload = {}) {
@@ -81,10 +126,12 @@ class NetworkManager {
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+    } else if (this.everConnected) {
+      // Temporarily offline: hold the message and deliver it after reconnect
+      (this.queue = this.queue || []).push(msg);
     } else if (this.broadcastChannel) {
-      // Local broadcast fallback (for testing in tabs / local device)
+      // Server never reachable: local-only fallback (tabs on one device)
       this.broadcastChannel.postMessage(msg);
-      // Also process locally for host/self
       setTimeout(() => this.handleMessage(msg), 10);
     }
   }
@@ -123,3 +170,13 @@ class NetworkManager {
 }
 
 window.network = new NetworkManager();
+
+document.addEventListener('visibilitychange', () => {
+  const n = window.network;
+  if (document.visibilityState === 'visible' && n.everConnected &&
+      (!n.ws || n.ws.readyState !== WebSocket.OPEN)) {
+    if (n.roomCode) n.rejoinNeeded = true;
+    n.retry = 0;
+    if (!n._reconnectTimer) n._open();
+  }
+});

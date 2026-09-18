@@ -148,22 +148,29 @@ class FriendsQuizGame {
     });
 
     window.network.on('JOIN_ROOM', (msg) => {
-      this.players[msg.senderId] = {
-        name: msg.payload.playerName,
-        score: 0,
-        isHost: false
-      };
+      const existing = this.players[msg.senderId];
+      if (existing) {
+        existing.name = msg.payload.playerName; // rejoin: keep the score
+      } else {
+        this.players[msg.senderId] = { name: msg.payload.playerName, score: 0, isHost: false };
+      }
       this.renderLobbyPlayers();
 
-      // If host, send current state to the new joiner
-      if (window.network.isHost) {
+      // Lobby only: host shares the player list with the new joiner
+      if (window.network.isHost && this.gameState === 'LOBBY') {
         window.network.send('SYNC_PLAYERS', { players: this.players });
       }
     });
 
     window.network.on('SYNC_PLAYERS', (msg) => {
+      if (this.gameState !== 'LOBBY') return; // never clobber scores mid-game
       this.players = msg.payload.players;
       this.renderLobbyPlayers();
+    });
+
+    // Authoritative scores from the server (sent on (re)join)
+    window.network.on('SCORES', (msg) => {
+      this.applyScores(msg.payload.scores);
     });
 
     window.network.on('GAME_STARTED', (msg) => {
@@ -194,6 +201,14 @@ class FriendsQuizGame {
     window.network.on('GAME_OVER', (msg) => {
       this.players = msg.payload.players;
       this.renderGameOver();
+    });
+  }
+
+  // Server is the single source of truth for scores.
+  applyScores(scores) {
+    if (!scores) return;
+    Object.entries(scores).forEach(([id, p]) => {
+      this.players[id] = { ...(this.players[id] || {}), name: p.name, score: p.score, isHost: p.isHost };
     });
   }
 
@@ -440,7 +455,8 @@ class FriendsQuizGame {
       playerName: window.network.playerName,
       optIndex,
       isCorrect,
-      isTimeout
+      isTimeout,
+      qIndex: this.currentQIndex
     });
   }
 
@@ -461,9 +477,13 @@ class FriendsQuizGame {
 
     // A given player can only be scored once per question. Guards against a
     // duplicated ANSWER_RESULT (double delivery, timeout + click race, etc.).
+    // With the server online it sends the authoritative table (payload.scores);
+    // local +1/-2 is only the offline fallback.
+    const serverScored = !!payload.scores;
+    if (serverScored) this.applyScores(payload.scores);
     const scoreKey = `${this.currentQIndex}:${playerId}`;
-    const alreadyScored = this.scoredKeys.has(scoreKey);
-    if (!alreadyScored) this.scoredKeys.add(scoreKey);
+    const alreadyScored = serverScored || this.scoredKeys.has(scoreKey);
+    if (!serverScored && !alreadyScored) this.scoredKeys.add(scoreKey);
 
     if (isCorrect) {
       window.sounds.playCorrect();

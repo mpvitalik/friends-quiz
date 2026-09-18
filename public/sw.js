@@ -1,4 +1,4 @@
-const CACHE_NAME = 'friends-quiz-v7';
+const CACHE_NAME = 'friends-quiz-v8';
 const ASSETS = [
   './',
   './index.html',

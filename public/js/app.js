@@ -58,6 +58,45 @@ class FriendsQuizGame {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     const target = document.getElementById(screenId);
     if (target) target.classList.add('active');
+
+    // The host ends the game for everyone; other players just leave it
+    const label = window.network && window.network.isHost ? '⛔ Закончить игру' : '🚪 Выйти из игры';
+    ['btnEndGame', 'btnEndGameLobby'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = label;
+    });
+  }
+
+  // Drop the round completely and go back to the home screen
+  resetToHome() {
+    clearInterval(this.timerInterval);
+    clearTimeout(this.hostWatchdog);
+    window.sounds.stopMusic();
+    window.network.clearSession();
+    this.players = {};
+    this.gameQuestions = [];
+    this.currentQIndex = 0;
+    this.lastAdvancedIndex = -1;
+    this.scoredKeys.clear();
+    this.failedPlayersForCurrentQ.clear();
+    this.answeringPlayerId = null;
+    this.gameState = 'LOBBY';
+    document.body.classList.remove('restoring');
+    document.getElementById('btnStartGame').style.display = '';
+    document.getElementById('lobbyStatusText').textContent = '';
+    this.showScreen('screenHome');
+    this.setHostingBusy(!!this.hostingBusy);
+  }
+
+  endGameOrLeave() {
+    if (window.network.isHost) {
+      if (!confirm('Закончить игру для всех игроков? Текущий раунд будет сброшен.')) return;
+      window.network.send('END_GAME', {});
+    } else {
+      if (!confirm('Выйти из игры?')) return;
+      window.network.send('LEAVE_ROOM', {});
+    }
+    this.resetToHome();
   }
 
   setupDOMHandlers() {
@@ -73,6 +112,14 @@ class FriendsQuizGame {
       paint();
       soundBtn.onclick = () => { window.sounds.toggle(); paint(); };
     }
+
+    // Home menu: rules / sources, end game
+    document.getElementById('btnRules').onclick = () => this.showScreen('screenRules');
+    document.getElementById('btnSources').onclick = () => this.showScreen('screenSources');
+    document.getElementById('btnBackRules').onclick = () => this.showScreen('screenHome');
+    document.getElementById('btnBackSources').onclick = () => this.showScreen('screenHome');
+    document.getElementById('btnEndGame').onclick = () => this.endGameOrLeave();
+    document.getElementById('btnEndGameLobby').onclick = () => this.endGameOrLeave();
 
     // Nav buttons
     document.getElementById('btnHostRoom').onclick = () => this.showScreen('screenCreateRoom');
@@ -186,6 +233,18 @@ class FriendsQuizGame {
       this.players = {};
       this.gameState = 'LOBBY';
       this.showScreen('screenHome');
+    });
+
+    // Host ended the round: everybody goes back to the home screen
+    window.network.on('GAME_ENDED', () => {
+      if (!window.network.roomCode) return; // already left locally
+      this.resetToHome();
+      alert('Ведущий закончил игру.');
+    });
+
+    window.network.on('PLAYER_LEFT', (msg) => {
+      delete this.players[msg.payload.playerId];
+      if (this.gameState === 'LOBBY') this.renderLobbyPlayers();
     });
 
     window.network.on('ROOM_BUSY', () => {

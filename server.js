@@ -258,6 +258,32 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'END_GAME': {
+          // Host aborts the round for everybody and frees the room
+          const room = rooms.get(roomCode);
+          const me = room && room.players.get(senderId);
+          if (room && me && me.isHost) {
+            broadcastToRoom(roomCode, { type: 'GAME_ENDED', roomCode, payload: {} });
+            rooms.delete(roomCode);
+            console.log(`🛑 Game ended by host in [${roomCode}]`);
+          }
+          currentRoomCode = null;
+          currentPlayerId = null;
+          break;
+        }
+
+        case 'LEAVE_ROOM': {
+          const room = rooms.get(roomCode);
+          if (room && room.players.has(senderId)) {
+            room.players.delete(senderId);
+            broadcastToRoom(roomCode, { type: 'PLAYER_LEFT', roomCode, payload: { playerId: senderId } });
+            if (room.players.size === 0) rooms.delete(roomCode);
+          }
+          currentRoomCode = null;
+          currentPlayerId = null;
+          break;
+        }
+
         case 'GAME_OVER': {
           const room = rooms.get(roomCode);
           if (room) {

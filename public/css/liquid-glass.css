@@ -791,3 +791,18 @@ body {
 
 /* Hide screens for a moment while an in-progress game is being restored after a refresh */
 body.restoring .screen { visibility: hidden; }
+
+/* Home menu + info screens */
+.menu-row { display: flex; gap: 10px; }
+.menu-row .glass-btn { flex: 1; }
+.glass-btn.small { padding: 11px 12px; font-size: 0.78rem; letter-spacing: 0.4px; }
+
+.info-card { text-align: left; }
+.info-title { font-family: var(--font-display); font-weight: 800; margin-bottom: 14px; }
+.info-text { color: #CBD5E1; font-size: 0.95rem; line-height: 1.55; margin-bottom: 12px; }
+.info-list { padding-left: 20px; display: flex; flex-direction: column; gap: 9px; color: #CBD5E1; font-size: 0.95rem; line-height: 1.5; }
+.info-list strong { color: #fff; }
+.info-card code { background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 6px; font-size: 0.85em; }
+.info-card a { color: var(--primary-yellow); font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+
+.end-game-btn { align-self: center; opacity: 0.85; margin-bottom: 4px; }

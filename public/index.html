@@ -51,8 +51,48 @@
           <button class="glass-btn accent" id="btnJoinRoom">
             <span>🎮 Войти по коду комнаты</span>
           </button>
+          <div class="menu-row">
+            <button class="glass-btn secondary small" id="btnRules">📖 Правила</button>
+            <button class="glass-btn secondary small" id="btnSources">📚 Источник вопросов</button>
+          </div>
           <div id="hostBusyHint" class="busy-hint" hidden>Игра уже создана — попросите код у ведущего и войдите по нему.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- SCREEN: RULES -->
+    <div id="screenRules" class="screen">
+      <div class="glass-card info-card">
+        <h3 class="info-title">🎮 Правила и Механика</h3>
+        <ul class="info-list">
+          <li><strong>20 вопросов</strong> из базы в ~1000 вопросов: 860 составлены по сюжетам всех 236 серий (у каждого в <code>questions.json</code> есть поле <code>source</code>, например <code>S3E12</code>), остальные — общие вопросы о сериале.</li>
+          <li><strong>60 секунд</strong> на вопрос. Варианты A/B/C/D заблокированы до нажатия баззера.</li>
+          <li>Первый, кто нажал <strong>«ЗНАЮ!»</strong>, замораживает общий таймер и получает <strong>30 секунд</strong> на выбор варианта ответа.</li>
+          <li><strong>+1 балл</strong> за правильный ответ.</li>
+          <li><strong>-2 балла</strong> за ошибку (кнопка разблокируется для остальных игроков на оставшееся время!).</li>
+          <li>Защита от спама/фальстарта блокирует кнопку на 2 секунды.</li>
+          <li>В финале генерируется <strong>Почетная Грамота Победителя</strong> с возможностью скачать картинку PNG.</li>
+        </ul>
+        <button class="glass-btn secondary" id="btnBackRules" style="width:100%;margin-top:18px;">Назад</button>
+      </div>
+    </div>
+
+    <!-- SCREEN: SOURCES -->
+    <div id="screenSources" class="screen">
+      <div class="glass-card info-card">
+        <h3 class="info-title">📚 Источник вопросов</h3>
+        <p class="info-text">
+          Сюжеты серий взяты с Friends Wiki
+          (<a href="https://friends.fandom.com" target="_blank" rel="noopener noreferrer">friends.fandom.com</a>,
+          раздел <em>Plot</em> каждой серии, лицензия CC BY-SA).
+          Вопросы и варианты ответов написаны по этим текстам; верный ответ подтверждается сюжетом серии,
+          неверные варианты придуманы и в сюжете не встречаются как правильные.
+        </p>
+        <ul class="info-list">
+          <li><code>tools/fetch_plots.py</code> — скачивает сюжеты серий.</li>
+          <li><code>tools/build_questions.py</code> + <code>tools/eps/s1.py … s10.py</code> — собирают <code>public/data/questions.json</code> и проверяют структуру и дубликаты.</li>
+        </ul>
+        <button class="glass-btn secondary" id="btnBackSources" style="width:100%;margin-top:18px;">Назад</button>
       </div>
     </div>
 
@@ -117,6 +157,9 @@
 
         <button class="glass-btn primary" id="btnStartGame" style="width: 100%; margin-top: 10px;">
           🚀 Начать раунд (20 вопросов)
+        </button>
+        <button class="glass-btn secondary small end-game-btn" id="btnEndGameLobby" style="width: 100%; margin-top: 10px;">
+          ⛔ Закончить игру
         </button>
       </div>
     </div>
@@ -186,6 +229,8 @@
           <span style="font-size: 0.7rem; font-weight: 700; opacity: 0.8; margin-top: 4px;" id="buzzerStatusText">НАЖМИ ПЕРВЫМ!</span>
         </button>
       </div>
+
+      <button class="glass-btn secondary small end-game-btn" id="btnEndGame" type="button">⛔ Закончить игру</button>
 
     </div>
 

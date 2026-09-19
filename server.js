@@ -25,7 +25,11 @@ const MIME_TYPES = {
 
 // HTTP Static Server
 const server = http.createServer((req, res) => {
-  let filePath = path.join(PUBLIC_DIR, req.url === '/' ? 'index.html' : req.url.split('?')[0]);
+  // Ignore the query string / hash (Telegram and links add ?params to "/")
+  let urlPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
+  if (urlPath.endsWith('/')) urlPath += 'index.html';
+  let filePath = path.normalize(path.join(PUBLIC_DIR, urlPath));
+  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
   const ext = path.extname(filePath).toLowerCase();
 
   fs.readFile(filePath, (err, content) => {
@@ -79,6 +83,40 @@ function scoresSnapshot(room) {
   return out;
 }
 
+// Everything a returning (refreshed / reconnected) client needs to restore the screen.
+function stateSnapshot(room, roomCode, playerId) {
+  const now = Date.now();
+  const q = room.q || null;
+  let remaining = 60;
+  let answerElapsed = 0;
+  if (q) {
+    if (q.phase === 'QUESTION') remaining = Math.max(1, Math.round(q.base - (now - q.at) / 1000));
+    else remaining = Math.max(1, Math.round(q.base));
+    if (q.phase === 'BUZZED') answerElapsed = Math.max(0, Math.round((now - q.buzzAt) / 1000));
+  }
+  const me = room.players.get(playerId);
+  return {
+    roomCode,
+    isHost: !!(me && me.isHost),
+    started: !!room.questions,
+    over: !!room.finished && !!room.questions,
+    questions: room.questions || null,
+    q: q ? {
+      index: q.index,
+      phase: q.phase,
+      answeringId: q.answeringId || null,
+      failed: q.failed || [],
+      remaining,
+      answerElapsed
+    } : null,
+    scores: scoresSnapshot(room)
+  };
+}
+
+function sendState(ws, room, roomCode, playerId) {
+  ws.send(JSON.stringify({ type: 'STATE', roomCode, payload: stateSnapshot(room, roomCode, playerId) }));
+}
+
 // Only one game at a time: a room is "active" while it isn't finished and
 // at least one of its players still has an open socket.
 function hasActiveRoom() {
@@ -114,10 +152,18 @@ wss.on('connection', (ws) => {
 
           const existing = rooms.get(roomCode);
           if (existing && existing.players.has(senderId)) {
-            // Host reconnecting: keep the room and scores, just rebind the socket
+            // Host reconnecting / refreshed the page: keep the room, rebind the socket
             existing.hostWs = ws;
             existing.players.get(senderId).ws = ws;
-            ws.send(JSON.stringify({ type: 'SCORES', roomCode, payload: { scores: scoresSnapshot(existing) } }));
+            sendState(ws, existing, roomCode, senderId);
+            break;
+          }
+
+          if (payload.rejoin) {
+            // The room no longer exists (e.g. server restarted)
+            currentRoomCode = null;
+            currentPlayerId = null;
+            ws.send(JSON.stringify({ type: 'ROOM_GONE', payload: {} }));
             break;
           }
 
@@ -147,6 +193,12 @@ wss.on('connection', (ws) => {
           currentPlayerId = senderId;
 
           let room = rooms.get(roomCode);
+          if (!room && payload.rejoin) {
+            currentRoomCode = null;
+            currentPlayerId = null;
+            ws.send(JSON.stringify({ type: 'ROOM_GONE', payload: {} }));
+            break;
+          }
           if (!room) {
             // Auto-create if not exists
             room = {
@@ -169,7 +221,7 @@ wss.on('connection', (ws) => {
           console.log(`👤 Player joined: ${payload.playerName} in [${roomCode}]`);
 
           broadcastToRoom(roomCode, msg);
-          ws.send(JSON.stringify({ type: 'SCORES', roomCode, payload: { scores: scoresSnapshot(room) } }));
+          sendState(ws, room, roomCode, senderId);
           break;
         }
 
@@ -179,6 +231,12 @@ wss.on('connection', (ws) => {
             // Check race condition: only first buzzer counts
             if (!room.buzzerLocked) {
               room.buzzerLocked = true;
+              if (room.q && room.q.phase === 'QUESTION') {
+                room.q.base = Math.max(0, room.q.base - (Date.now() - room.q.at) / 1000);
+                room.q.phase = 'BUZZED';
+                room.q.answeringId = senderId;
+                room.q.buzzAt = Date.now();
+              }
               console.log(`🔔 BUZZER pressed by ${senderName} in [${roomCode}]`);
               broadcastToRoom(roomCode, msg);
             }
@@ -193,6 +251,8 @@ wss.on('connection', (ws) => {
             room.buzzerLocked = false;
             room.scoreKeys = new Set();
             room.players.forEach((p) => { p.score = 0; });
+            room.questions = payload.questions || null;
+            room.q = { index: 0, phase: 'QUESTION', failed: [], answeringId: null, base: 60, at: Date.now() };
           }
           broadcastToRoom(roomCode, msg);
           break;
@@ -212,6 +272,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(roomCode);
           if (room) {
             room.buzzerLocked = false;
+            room.q = { index: payload.qIndex, phase: 'QUESTION', failed: [], answeringId: null, base: 60, at: Date.now() };
           }
           broadcastToRoom(roomCode, msg);
           break;
@@ -233,6 +294,21 @@ wss.on('connection', (ws) => {
             if (player && !room.scoreKeys.has(key)) {
               room.scoreKeys.add(key);
               player.score += payload.isCorrect ? 1 : -2;
+            }
+            if (room.q) {
+              if (payload.isCorrect) {
+                room.q.phase = 'REVEAL';
+              } else {
+                if (!room.q.failed.includes(senderId)) room.q.failed.push(senderId);
+                const stillIn = [...room.players.keys()].filter((id) => !room.q.failed.includes(id)).length;
+                if (stillIn > 0 && room.q.base > 3) {
+                  room.q.phase = 'QUESTION';   // question reopens for the others
+                  room.q.at = Date.now() + 1500; // client waits 1.5s before reopening
+                  room.q.answeringId = null;
+                } else {
+                  room.q.phase = 'REVEAL';
+                }
+              }
             }
             msg.payload = { ...payload, scores: scoresSnapshot(room) };
           }

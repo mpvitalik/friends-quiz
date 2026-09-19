@@ -9,6 +9,8 @@ class NetworkManager {
     this.roomCode = null;
     this.playerName = null;
     this.playerId = 'p_' + Math.random().toString(36).substr(2, 9);
+    this.restoredSession = false;
+    this._loadSession();
     this.callbacks = {};
     this.connected = false;
     this.broadcastChannel = null;
@@ -28,6 +30,46 @@ class NetworkManager {
     if (this.callbacks[event]) {
       this.callbacks[event].forEach(cb => cb(data));
     }
+  }
+
+  // ---- session persistence (survives a page refresh / PWA relaunch) ----
+  _loadSession() {
+    try {
+      const raw = localStorage.getItem('friends_quiz_session');
+      if (!raw) return;
+      const sess = JSON.parse(raw);
+      if (!sess || !sess.roomCode || !sess.playerId || Date.now() - sess.savedAt > 3 * 60 * 60 * 1000) {
+        localStorage.removeItem('friends_quiz_session');
+        return;
+      }
+      this.playerId = sess.playerId;
+      this.playerName = sess.playerName;
+      this.roomCode = sess.roomCode;
+      this.isHost = !!sess.isHost;
+      this.rejoinNeeded = true;       // first WS open re-attaches us to the room
+      this.restoredSession = true;
+    } catch (e) { /* ignore */ }
+  }
+
+  saveSession() {
+    try {
+      if (!this.roomCode) return;
+      localStorage.setItem('friends_quiz_session', JSON.stringify({
+        playerId: this.playerId,
+        playerName: this.playerName,
+        roomCode: this.roomCode,
+        isHost: this.isHost,
+        savedAt: Date.now()
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  clearSession() {
+    try { localStorage.removeItem('friends_quiz_session'); } catch (e) { /* ignore */ }
+    this.roomCode = null;
+    this.isHost = false;
+    this.rejoinNeeded = false;
+    this.restoredSession = false;
   }
 
   connect() {
@@ -55,8 +97,8 @@ class NetworkManager {
         if (this.roomCode && this.rejoinNeeded) {
           this.rejoinNeeded = false;
           this._rawSend(this.isHost
-            ? { type: 'CREATE_ROOM', payload: { hostId: this.playerId, hostName: this.playerName } }
-            : { type: 'JOIN_ROOM', payload: { playerId: this.playerId, playerName: this.playerName } });
+            ? { type: 'CREATE_ROOM', payload: { hostId: this.playerId, hostName: this.playerName, rejoin: true } }
+            : { type: 'JOIN_ROOM', payload: { playerId: this.playerId, playerName: this.playerName, rejoin: true } });
         }
         // Flush anything queued while offline
         const queued = this.queue || [];
@@ -153,6 +195,7 @@ class NetworkManager {
       hostId: this.playerId,
       hostName: this.playerName
     });
+    this.saveSession();
 
     return this.roomCode;
   }
@@ -166,6 +209,7 @@ class NetworkManager {
       playerId: this.playerId,
       playerName: this.playerName
     });
+    this.saveSession();
   }
 }
 

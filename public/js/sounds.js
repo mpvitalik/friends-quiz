@@ -155,10 +155,97 @@ class SoundEffects {
   }
 
   // ========================================================================
-  // Background music — light "quiz tension" bed, à la a TV quiz show.
-  // Fully synthesized (no audio files, no third-party melodies): a soft
-  // string-like pad on a slow two-chord loop + a quiet heartbeat pulse.
+  // Background music — an original, cheerful sitcom-style loop (C major):
+  // lead melody + plucked chord arpeggio + bass + light hi-hat.
+  // Fully synthesized, no audio files. 8 bars, repeats for the whole game.
   // ========================================================================
+
+  _midi(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  _musicNote(freq, when, dur, { type = 'triangle', gain = 0.2, attack = 0.012, dest = null, detune = 0 } = {}) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, when);
+    o.detune.value = detune;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(gain, when + attack);
+    g.gain.exponentialRampToValueAtTime(gain * 0.55, when + Math.min(dur * 0.5, 0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    o.connect(g);
+    g.connect(dest || this.music.filter);
+    o.start(when);
+    o.stop(when + dur + 0.05);
+  }
+
+  _hat(when) {
+    const ctx = this.ctx;
+    if (!this._noise) {
+      const len = ctx.sampleRate * 0.1;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this._noise = buf;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this._noise;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 7000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.09, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+    src.connect(hp); hp.connect(g); g.connect(this.music.bus);
+    src.start(when);
+    src.stop(when + 0.08);
+  }
+
+  // Schedule one eighth-note step of the 8-bar loop
+  _musicStep(step, when, eighth) {
+    const bar = Math.floor(step / 8) % 8;
+    const pos = step % 8;
+
+    // Chord per bar: C  Am  F  G  |  C  Am  F  G
+    const CHORDS = [
+      { bass: 48, tri: [60, 64, 67] },  // C
+      { bass: 45, tri: [57, 60, 64] },  // Am
+      { bass: 41, tri: [57, 60, 65] },  // F
+      { bass: 43, tri: [59, 62, 67] },  // G
+    ];
+    const ch = CHORDS[bar % 4];
+
+    // Bass: root on beats 1 and 3, fifth on the "and" of 2
+    if (pos === 0 || pos === 4) this._musicNote(this._midi(ch.bass), when, eighth * 3.2, { type: 'triangle', gain: 0.42 });
+    if (pos === 6) this._musicNote(this._midi(ch.bass + 7), when, eighth * 1.6, { type: 'triangle', gain: 0.3 });
+
+    // Plucked arpeggio, up-down pattern over the triad
+    const arp = [0, 1, 2, 1, 0, 1, 2, 1][pos];
+    this._musicNote(this._midi(ch.tri[arp] + 12), when, eighth * 1.8, { type: 'sine', gain: 0.2, attack: 0.005 });
+
+    // Light hi-hat on the off-beats
+    if (pos % 2 === 1) this._hat(when);
+
+    // Lead melody: [startStep, midi, lengthInEighths]
+    const MELODY = [
+      [[0,76,2],[2,79,1],[3,76,1],[4,74,2],[6,72,2]],
+      [[0,72,2],[2,76,1],[3,81,1],[4,79,2],[6,76,2]],
+      [[0,81,2],[2,79,1],[3,77,1],[4,76,2],[6,72,2]],
+      [[0,74,2],[2,71,1],[3,74,1],[4,79,3]],
+      [[0,79,2],[2,76,1],[3,79,1],[4,84,2],[6,79,2]],
+      [[0,76,2],[2,81,1],[3,79,1],[4,76,2],[6,74,2]],
+      [[0,77,2],[2,81,1],[3,84,1],[4,81,2],[6,77,2]],
+      [[0,79,2],[2,77,1],[3,74,1],[4,72,4]],
+    ];
+    MELODY[bar].forEach(([st, m, len]) => {
+      if (st === pos) {
+        const f = this._midi(m);
+        const d = eighth * len * 0.95;
+        this._musicNote(f, when, d, { type: 'triangle', gain: 0.5, attack: 0.015 });
+        this._musicNote(f, when, d, { type: 'sine', gain: 0.32, attack: 0.02, detune: 6 });
+      }
+    });
+  }
 
   startMusic() {
     this.musicWanted = true;
@@ -169,85 +256,38 @@ class SoundEffects {
     const ctx = this.ctx;
     const now = ctx.currentTime;
 
+    // Music bus — loud enough to be clearly heard over the SFX
     const bus = ctx.createGain();
     bus.gain.setValueAtTime(0.0001, now);
-    bus.gain.linearRampToValueAtTime(0.05, now + 2.0); // gentle fade-in, quiet
-    bus.connect(ctx.destination);
+    bus.gain.linearRampToValueAtTime(0.55, now + 1.2);
+    const comp = ctx.createDynamicsCompressor(); // keeps the louder mix from clipping
+    comp.threshold.value = -14;
+    comp.ratio.value = 4;
+    bus.connect(comp);
+    comp.connect(ctx.destination);
 
-    // Keep everything soft and warm
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 850;
-    filter.Q.value = 0.6;
+    filter.frequency.value = 5200;
+    filter.Q.value = 0.5;
     filter.connect(bus);
 
-    // Sustained pad chord (A minor). Slight detune = string ensemble feel.
-    const chordA = [110.0, 164.81, 220.0, 329.63];   // Am
-    const chordF = [87.31, 174.61, 261.63, 349.23];  // F
-    const pad = chordA.map((f, i) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = i === 0 ? 'triangle' : 'sawtooth';
-      o.frequency.setValueAtTime(f, now);
-      o.detune.value = (i - 1.5) * 5;
-      g.gain.value = 0.11 / chordA.length;
-      o.connect(g);
-      g.connect(filter);
-      o.start(now);
-      return { o, g };
-    });
+    this.music = { bus, filter, comp, timer: null };
 
-    // Heartbeat / ticking pulse — the tension driver
-    const bpm = 80;
-    const beat = 60 / bpm;
-    const bass = [55.0, 55.0, 65.41, 55.0, 43.65, 43.65, 65.41, 61.74]; // A1 walk / F1
-    const state = { step: 0 };
+    const bpm = 112;
+    const eighth = 60 / bpm / 2;
+    let step = 0;
+    let next = now + 0.1;
 
-    const timer = setInterval(() => {
+    // Look-ahead scheduler: keeps ~0.6s of notes queued, drift-free
+    this.music.timer = setInterval(() => {
       if (!this.ctx || !this.music) return;
-      const t = this.ctx.currentTime + 0.05;
-      const step = state.step;
-
-      // Every 8 beats, drift the pad between Am and F
-      if (step % 8 === 0) {
-        const target = (step % 16 === 0) ? chordA : chordF;
-        this.music.pad.forEach((v, i) => {
-          try { v.o.frequency.setTargetAtTime(target[i], t, 1.2); } catch (e) { /* ignore */ }
-        });
+      while (next < this.ctx.currentTime + 0.6) {
+        this._musicStep(step, next, eighth);
+        step = (step + 1) % 64;
+        next += eighth;
       }
-
-      // Soft plucked bass on every beat
-      const bf = bass[step % bass.length];
-      const bo = this.ctx.createOscillator();
-      const bg = this.ctx.createGain();
-      bo.type = 'triangle';
-      bo.frequency.setValueAtTime(bf, t);
-      bg.gain.setValueAtTime(0.0001, t);
-      bg.gain.exponentialRampToValueAtTime(0.14, t + 0.02);
-      bg.gain.exponentialRampToValueAtTime(0.0001, t + beat * 0.95);
-      bo.connect(bg);
-      bg.connect(this.music.filter);
-      bo.start(t);
-      bo.stop(t + beat);
-
-      // Faint high "tick" on the off-beats
-      if (step % 2 === 1) {
-        const to = this.ctx.createOscillator();
-        const tg = this.ctx.createGain();
-        to.type = 'sine';
-        to.frequency.setValueAtTime(1975.53, t);
-        tg.gain.setValueAtTime(0.022, t);
-        tg.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-        to.connect(tg);
-        tg.connect(this.music.bus);
-        to.start(t);
-        to.stop(t + 0.1);
-      }
-
-      state.step++;
-    }, beat * 1000);
-
-    this.music = { bus, filter, pad, timer };
+    }, 100);
   }
 
   // Stop but remember that the game still wants music (e.g. user hit mute)
@@ -258,15 +298,8 @@ class SoundEffects {
     clearInterval(m.timer);
     const ctx = this.ctx;
     if (ctx) {
-      const now = ctx.currentTime;
-      try { m.bus.gain.setTargetAtTime(0.0001, now, 0.35); } catch (e) { /* ignore */ }
-      m.pad.forEach(v => {
-        try {
-          v.g.gain.setTargetAtTime(0.0001, now, 0.3);
-          v.o.stop(now + 1.4);
-        } catch (e) { /* ignore */ }
-      });
-      setTimeout(() => { try { m.bus.disconnect(); } catch (e) { /* ignore */ } }, 1800);
+      try { m.bus.gain.cancelScheduledValues(ctx.currentTime); m.bus.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.25); } catch (e) { /* ignore */ }
+      setTimeout(() => { try { m.bus.disconnect(); m.comp && m.comp.disconnect(); } catch (e) { /* ignore */ } }, 1200);
     }
   }
 

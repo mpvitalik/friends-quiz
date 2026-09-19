@@ -34,12 +34,24 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* The gradient lives on <html> so it always fills the whole screen —
+   including the notch / home-indicator areas of an installed PWA. */
+html {
+  background: #080D1A radial-gradient(circle at 20% 15%, #2A1B4E 0%, #0F172A 45%, #080D1A 100%) fixed;
+  min-height: 100%;
+}
+
 body {
-  background: radial-gradient(circle at 20% 15%, #2A1B4E 0%, #0F172A 45%, #080D1A 100%);
+  background: transparent;
   color: var(--text-main);
   font-family: var(--font-body);
   min-height: 100vh;
-  min-height: -webkit-fill-available;
+  min-height: 100dvh;
+  /* keep content clear of the status bar and the home indicator */
+  padding-top: max(16px, calc(env(safe-area-inset-top, 0px) + 8px)) !important;
+  padding-bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 8px)) !important;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -52,10 +64,9 @@ body {
 /* Background Animated Bokeh Blobs */
 .bg-blobs {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 0;
   overflow: hidden;
@@ -100,8 +111,8 @@ body {
 
 .sound-toggle {
   position: fixed;
-  top: 10px;
-  right: 10px;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
   z-index: 50;
   width: 38px;
   height: 38px;
@@ -684,7 +695,7 @@ body {
 
 /* Responsive fixes */
 @media (max-width: 480px) {
-  body { padding: 10px; }
+  body { padding: 10px; } /* safe-area paddings above keep priority via !important */
   .friends-logo { font-size: 1.85rem; }
   .buzzer-btn { width: 130px; height: 130px; font-size: 1.25rem; }
   .glass-card { padding: 18px 14px; border-radius: 20px; }
@@ -709,7 +720,7 @@ body {
 /* Timer bar stays pinned to the top while scrolling the question */
 #screenGame .game-status-bar {
   position: sticky;
-  top: 6px;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
   z-index: 20;
   padding-right: 54px; /* clear the fixed sound toggle */
   background: rgba(15, 23, 42, 0.85);
@@ -720,7 +731,7 @@ body {
 /* Buzzer stays pinned to the bottom — always one tap away */
 #screenGame .buzzer-container {
   position: sticky;
-  bottom: 8px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
   z-index: 20;
   margin: 4px 0 0;
 }
@@ -777,3 +788,6 @@ body {
   text-align: center;
   margin-top: 2px;
 }
+
+/* Hide screens for a moment while an in-progress game is being restored after a refresh */
+body.restoring .screen { visibility: hidden; }

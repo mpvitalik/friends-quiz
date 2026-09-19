@@ -28,6 +28,12 @@ class FriendsQuizGame {
     this.lastBuzzerAttempt = 0;
     this.isSpamBlocked = false;
 
+    // Returning after a refresh: don't flash the home screen before the server answers
+    if (window.network.restoredSession) {
+      document.body.classList.add('restoring');
+      setTimeout(() => document.body.classList.remove('restoring'), 4000);
+    }
+
     this.init();
   }
 
@@ -134,7 +140,7 @@ class FriendsQuizGame {
 
     // Share / Download diploma
     document.getElementById('btnDownloadDiploma').onclick = () => this.downloadDiploma();
-    document.getElementById('btnPlayAgain').onclick = () => location.reload();
+    document.getElementById('btnPlayAgain').onclick = () => { window.network.clearSession(); location.reload(); };
   }
 
   setupNetworkHandlers() {
@@ -170,6 +176,17 @@ class FriendsQuizGame {
 
     // Only one host at a time: lock "Create game" while a game is in progress
     window.network.on('LOBBY_STATUS', (msg) => this.setHostingBusy(!!msg.payload.busy));
+
+    // Page was refreshed / socket reconnected: the server tells us where the game is
+    window.network.on('STATE', (msg) => this.restoreFromState(msg.payload));
+
+    window.network.on('ROOM_GONE', () => {
+      document.body.classList.remove('restoring');
+      window.network.clearSession();
+      this.players = {};
+      this.gameState = 'LOBBY';
+      this.showScreen('screenHome');
+    });
 
     window.network.on('ROOM_BUSY', () => {
       alert('Игра уже создана другим ведущим. Войдите по коду комнаты.');
@@ -226,6 +243,69 @@ class FriendsQuizGame {
     });
     const hint = document.getElementById('hostBusyHint');
     if (hint) hint.hidden = !lock;
+  }
+
+  // Rebuild the exact screen (lobby / question / answer / results) from the server snapshot.
+  restoreFromState(st) {
+    document.body.classList.remove('restoring');
+    clearInterval(this.timerInterval);
+    window.network.roomCode = st.roomCode;
+    window.network.isHost = !!st.isHost;
+    window.network.saveSession();
+
+    this.players = {};
+    this.applyScores(st.scores);
+    document.getElementById('displayRoomCode').textContent = st.roomCode;
+
+    // Still in the lobby
+    if (!st.started) {
+      this.gameState = 'LOBBY';
+      document.getElementById('btnStartGame').style.display = st.isHost ? '' : 'none';
+      document.getElementById('lobbyStatusText').textContent = st.isHost ? '' : 'Ожидаем, пока ведущий запустит игру...';
+      this.renderLobbyPlayers();
+      this.showScreen('screenLobby');
+      return;
+    }
+
+    this.gameQuestions = st.questions;
+    this.totalRounds = this.gameQuestions.length;
+
+    if (st.over || !st.q) {
+      this.renderGameOver();
+      return;
+    }
+
+    const q = st.q;
+    const me = window.network.playerId;
+    this.currentQIndex = q.index;
+    this.lastAdvancedIndex = -1;
+    this.showScreen('screenGame');
+    this.renderQuestion(true);
+
+    this.failedPlayersForCurrentQ = new Set(q.failed || []);
+    this.questionTimeLeft = q.remaining;
+    this.updateTimerDisplay(this.questionTimeLeft);
+
+    if (q.phase === 'BUZZED' && q.answeringId) {
+      const who = this.players[q.answeringId];
+      this.onPlayerBuzzed(q.answeringId, who ? who.name : '', q.answerElapsed, true);
+    } else if (q.phase === 'REVEAL') {
+      clearInterval(this.timerInterval);
+      this.gameState = 'REVEAL';
+      const question = this.gameQuestions[q.index];
+      const btns = document.querySelectorAll('.option-btn');
+      if (btns[question.correctIndex]) btns[question.correctIndex].classList.add('correct');
+      document.getElementById('answeringBanner').textContent = 'Вопрос завершён';
+      document.getElementById('answeringBanner').classList.add('show');
+      document.getElementById('btnBuzzer').classList.add('locked');
+      document.getElementById('explanationBox').classList.add('show');
+      if (window.network.isHost) setTimeout(() => this.advanceNextQuestion(), 3000);
+    } else if (this.failedPlayersForCurrentQ.has(me)) {
+      document.getElementById('btnBuzzer').classList.add('locked');
+      document.getElementById('buzzerStatusText').textContent = 'ВЫ ЗАБЛОКИРОВАНЫ';
+    }
+
+    window.sounds.startMusic();
   }
 
   // Server is the single source of truth for scores.
@@ -295,7 +375,7 @@ class FriendsQuizGame {
     };
   }
 
-  renderQuestion() {
+  renderQuestion(quiet = false) {
     clearInterval(this.timerInterval);
     this.gameState = 'QUESTION';
     this.answeringPlayerId = null;
@@ -347,7 +427,7 @@ class FriendsQuizGame {
     this.updateTimerDisplay(this.questionTimeLeft);
     this.startQuestionTimer();
 
-    window.sounds.playStart();
+    if (!quiet) window.sounds.playStart();
   }
 
   startQuestionTimer() {
@@ -411,14 +491,14 @@ class FriendsQuizGame {
     });
   }
 
-  onPlayerBuzzed(playerId, playerName) {
+  onPlayerBuzzed(playerId, playerName, elapsed = 0, quiet = false) {
     if (this.gameState !== 'QUESTION') return;
 
-    window.sounds.playBuzzer();
+    if (!quiet) window.sounds.playBuzzer();
 
     this.gameState = 'BUZZED';
     this.answeringPlayerId = playerId;
-    this.answerTimeLeft = 30;
+    this.answerTimeLeft = Math.max(1, 30 - elapsed);
 
     // Lock buzzer for everyone
     const buzzer = document.getElementById('btnBuzzer');
